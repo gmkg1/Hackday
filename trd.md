@@ -335,26 +335,76 @@ This loops for a **maximum of 2 retries** before falling back to a standard, sta
 
 ## 6. Machine Learning Engine (scikit-learn)
 
-All ML operations are handled natively in Python using `scikit-learn`:
+All ML operations are handled natively in Python using `scikit-learn` in `backend/services/ml_engine.py`:
 
-### 6.1 Problem Type Inference
-* The service counts unique target values:
-  * $\le 10$ unique values or target type is object/category $\rightarrow$ Classification.
-  * $> 10$ unique values and target type is numeric $\rightarrow$ Regression.
+### 6.1 Implementations for Decision Layers
 
-### 6.2 ML Workflow
-1. **Baselines:** 
-   * Classification: `LogisticRegression()`, `DecisionTreeClassifier(max_depth=3)`
-   * Regression: `LinearRegression()`, `DecisionTreeRegressor(max_depth=3)`
-2. **K-Fold Evaluation:** Run 5-fold Cross Validation (`cross_val_score`) to collect baseline metrics.
-3. **Advanced Selection Recommendation:** The LLM recommends a model configuration (e.g., `RandomForestClassifier`, `GradientBoostingClassifier`).
-4. **Execution:** The ML Engine instantiates the scikit-learn estimator, trains it, and computes metrics:
-   * Classification: `accuracy_score`, `precision_score`, `recall_score`, `f1_score`, `roc_auc_score`.
-   * Regression: `mean_squared_error` (RMSE), `mean_absolute_error`, `r2_score`.
-5. **Diagnosis Analysis:** A comparison service runs:
-   * Overfitting Check: If Train Metric $-$ Test Metric $> 0.15$.
-   * Class Imbalance Check: Standard deviation of target distribution counts $> 0.25$.
-   * Data Leakage: If Test Metric is suspiciously $1.0$.
+#### Layer 1: Problem Type & Cardinality Auto-Detection
+The engine infers problem types programmatically from the target column:
+```python
+def infer_problem_type(df: pd.DataFrame, target_col: str) -> tuple[str, bool]:
+    """
+    Returns (problem_type, is_binary)
+    """
+    target = df[target_col].dropna()
+    unique_count = target.nunique()
+    dtype = target.dtype
+    
+    # Heuristics
+    if pd.api.types.is_numeric_dtype(dtype) and unique_count > 10:
+        return "regression", False
+    else:
+        is_binary = (unique_count == 2)
+        return "classification", is_binary
+```
+
+#### Layer 2: Baseline vs. Non-Linear Complexity Split
+The engine first runs baseline evaluations to determine dataset complexity:
+1. **Fit Baselines:** Runs K-Fold cross-validation on `LogisticRegression(max_iter=1000)` and `DecisionTreeClassifier(max_depth=3)`.
+2. **Comparison Logic:**
+   ```python
+   # Compare cross-validated scores
+   decision_tree_better = (dt_val_score - lr_val_score) > 0.05
+   if not decision_tree_better:
+       # Prioritize linear models with L1/L2 penalties
+       recommended_model_family = "linear" 
+   else:
+       # Prioritize tree ensembles (non-linear)
+       recommended_model_family = "tree_ensemble"
+   ```
+
+#### Layer 3: Dataset Scale & Sparsity Constraints
+The engine inspects row size and sparse feature counts:
+* **Scale Evaluation:**
+  ```python
+  num_rows, num_cols = df.shape
+  if num_rows < 5000:
+      # Recommend estimators with low variance parameters
+      scale_recommendation = "RandomForest"
+  else:
+      # Recommend boosting algorithms for larger scale
+      scale_recommendation = "XGBoost/LightGBM"
+  ```
+* **Sparsity & Categorical Detections:**
+  - High cardinality checks: If categoricals contain categories $> 50$, the engine prompts the LLM to use frequency encoding, target encoding, or to select an estimator like `CatBoost` or `HistGradientBoostingClassifier` which handle categorical structures efficiently.
+
+#### Layer 4: Diagnostic Feedback & Iterative Correction
+If performance falls below thresholds, the AI implements automated parameter constraints:
+* **Overfitting Check:**
+  $$\text{Score}_{\text{train}} - \text{Score}_{\text{val}} > 0.15$$
+  * Action: Add regularizers (`alpha`, `C` values) or restrict structural depth (`max_depth` capped at 5).
+* **Imbalance Check:**
+  $$\sigma_{\text{target\_distribution}} > 0.25$$
+  * Action: Inject `class_weight='balanced'` to Logistic Regression, Random Forest, or Decision Tree configurations.
+* **Data Leakage Check:**
+  $$\text{Score}_{\text{val}} \ge 0.999 \quad \text{and} \quad \text{Baseline Score} < 0.90$$
+  * Action: Triggers verification of generated cleaning code to search for target leakage in features.
+
+### 6.2 ML Workflow Execution
+1. Split data using `train_test_split(test_size=0.2, stratify=target)` for classification.
+2. Evaluate and log metrics to `SessionState.experiments`:
+   * **Classification Metrics:** `accuracy_score`, `precision_score` (macro), `recall_score` (macro), `f1_score` (macro), `roc_auc_score` (for binary).
+   * **Regression Metrics:** `mean_squared_error` (RMSE), `mean_absolute_error`, `r2_score`.
 
 ---
 

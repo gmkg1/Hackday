@@ -152,20 +152,40 @@ The generated code is executed automatically. If execution fails:
 4. Retry is executed.
 * **Maximum retries:** 2
 
-### 3. Autonomous Model Selection
-The system first trains lightweight baseline models.
+### 3. Autonomous Model Selection & Decision Framework
 
-* **Classification Baselines:** Logistic Regression, Decision Tree
-* **Regression Baselines:** Linear Regression, Decision Tree Regressor
+The system utilizes a **multi-layered decision framework** to evaluate the dataset and select the optimal model. Instead of randomly searching, the AI follows four progressive evaluation layers:
 
-Performance comparison determines dataset complexity. The AI then recommends stronger candidate models such as:
-* Random Forest
-* XGBoost
-* LightGBM
-* CatBoost
-* Extra Trees
+#### Layer 1: Problem Type & Target Cardinality
+* **Cardinality Analysis:** 
+  * Target unique values $\le 10$ or target dtype is object/categorical $\rightarrow$ **Classification**
+  * Target unique values $> 10$ and target dtype is numeric $\rightarrow$ **Regression**
+* **Class Configuration:** Identifies if classification is binary or multiclass to select matching estimators and evaluation metrics (e.g., ROC-AUC vs. Macro F1).
 
-Each recommendation includes a written explanation.
+#### Layer 2: Baseline vs. Non-Linear Complexity Split
+The AI initiates execution by training fast, low-complexity baselines:
+* **Classification Baselines:** Logistic Regression, Shallow Decision Tree (max depth = 3)
+* **Regression Baselines:** Linear Regression, Shallow Decision Tree Regressor (max depth = 3)
+* **Complexity Heuristic:** 
+  * If the Linear baseline matches or exceeds the Decision Tree accuracy, the dataset is marked as **linear**. The AI prioritizes regularized linear models (Ridge/Lasso/ElasticNet).
+  * If the Decision Tree significantly outperforms the linear baseline, the dataset contains **non-linear relationships**. The AI activates tree-based ensembles.
+
+#### Layer 3: Dataset Scale, Sparsity, & Feature Constraints
+The AI analyzes the dataset dimensions and shape:
+* **Data Scale (Row Count):**
+  * Small datasets ($< 5,000$ rows) $\rightarrow$ Recommends **Random Forest** or **Extra Trees** (robust to overfitting on small sample sizes).
+  * Medium/Large datasets ($\ge 5,000$ rows) $\rightarrow$ Recommends boosting algorithms: **XGBoost**, **LightGBM**, or **CatBoost**.
+* **Sparsity & Categorical Cardinality:**
+  * High-cardinality categorical variables present $\rightarrow$ Recommends **CatBoost** (natively handles categorical features efficiently).
+  * High dimensional/sparse feature matrices (due to One-Hot Encoding) $\rightarrow$ Recommends linear estimators with L1/L2 penalties.
+
+#### Layer 4: Diagnostic Feedback & Iterative Correction
+After initial model training, the AI monitors performance metrics and adjusts dynamically:
+* **High Variance (Overfitting):** If Train metric $-$ Validation metric $> 15\%$, the AI adds model constraints (e.g., reduces `max_depth`, increases `min_samples_leaf`, or increases `alpha` regularization parameters).
+* **Severe Class Imbalance:** If target class distribution variance is high, the AI enables class-balancing parameters in scikit-learn (`class_weight='balanced'`).
+* **Underfitting:** If both Train and Validation scores are low, the AI escalates model complexity (e.g., increases the number of estimators, increases tree depth, or switches to a more expressive algorithm family).
+
+Each final recommendation is generated with a clear, written explanation outlining which layers triggered the choice.
 
 ### 4. Experiment Engine
 Every experiment is recorded.
