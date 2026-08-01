@@ -1,0 +1,57 @@
+"""
+AutoML Scientist — Flask Application Entry Point.
+
+Registers all Blueprints, configures CORS, and starts the dev server.
+"""
+import sys
+import os
+
+# Ensure the backend directory is on the Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from flask import Flask, jsonify
+from flask_cors import CORS
+
+from routers.upload_router import upload_bp
+from routers.codegen_router import codegen_bp
+from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG
+
+
+def create_app() -> Flask:
+    """Flask application factory."""
+    app = Flask(__name__)
+
+    # ── CORS (allow React frontend) ───────────────────────────────────────
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+    # ── Register Blueprints ───────────────────────────────────────────────
+    app.register_blueprint(upload_bp)
+    app.register_blueprint(codegen_bp)
+
+    # ── Health Check ──────────────────────────────────────────────────────
+    @app.route("/api/health", methods=["GET"])
+    def health():
+        return jsonify({"status": "ok", "service": "automl-scientist"}), 200
+
+    # ── Error Handlers ────────────────────────────────────────────────────
+    @app.errorhandler(400)
+    def bad_request(e):
+        return jsonify({"error": "Bad request", "message": str(e)}), 400
+
+    @app.errorhandler(404)
+    def not_found(e):
+        return jsonify({"error": "Not found", "message": str(e)}), 404
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        return jsonify({"error": "Internal server error", "message": str(e)}), 500
+
+    return app
+
+
+# ── Run ───────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    app = create_app()
+    print(f"🚀 AutoML Scientist backend running on http://{FLASK_HOST}:{FLASK_PORT}")
+    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)
