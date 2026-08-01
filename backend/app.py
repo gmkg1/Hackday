@@ -53,5 +53,5 @@ def create_app() -> Flask:
 
 if __name__ == "__main__":
     app = create_app()
-    print(f"🚀 AutoML Scientist backend running on http://{FLASK_HOST}:{FLASK_PORT}")
+    print(f"[START] AutoML Scientist backend running on http://{FLASK_HOST}:{FLASK_PORT}")
     app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)
