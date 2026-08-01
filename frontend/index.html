@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoML Scientist</title>
+    <!-- Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --surface-color: rgba(30, 41, 59, 0.7);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #8b5cf6;
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --success: #10b981;
+            --error: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.15) 0px, transparent 50%);
+            background-attachment: fixed;
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 3rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            font-weight: 300;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            animation: fadeInUp 0.8s ease-out;
+        }
+
+        .glass-panel {
+            background: var(--surface-color);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.6);
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--primary);
+            border-radius: 1rem;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(59, 130, 246, 0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: var(--accent);
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            display: inline-block;
+        }
+
+        .upload-text {
+            font-size: 1.2rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-subtext {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* Results / Output Zone */
+        .results-zone {
+            display: none;
+        }
+
+        .results-zone.active {
+            display: block;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 0.75rem;
+            color: #fff;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .terminal {
+            background: #000;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #34d399;
+            height: 250px;
+            overflow-y: auto;
+            border: 1px solid #333;
+            margin-top: 1.5rem;
+        }
+
+        .terminal p {
+            margin-bottom: 0.5rem;
+            line-height: 1.4;
+        }
+
+        .terminal .error { color: var(--error); }
+        .terminal .info { color: #60a5fa; }
+        .terminal .success { color: var(--success); }
+        .terminal .timestamp { color: #666; font-size: 0.8rem; margin-right: 0.5rem; }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 0.75rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.3s ease, transform 0.1s ease;
+            margin-top: 1rem;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            background: #334155;
+            color: #94a3b8;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+            display: none;
+        }
+
+        /* Animations */
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>AutoML Scientist</h1>
+        <p class="subtitle">Autonomous Machine Learning Agent</p>
+    </header>
+
+    <div class="container">
+        <!-- Upload Section -->
+        <div class="glass-panel" id="uploadPanel">
+            <input type="file" id="fileInput" accept=".csv" />
+            <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-icon">📊</div>
+                <div class="upload-text">Drag & Drop Dataset or Click to Browse</div>
+                <div class="upload-subtext">Only .csv files up to 100MB are supported</div>
+            </div>
+            <button class="btn" id="uploadBtn" style="display: none; margin-top: 1.5rem;">
+                <span class="loader" id="uploadLoader"></span>
+                Analyze Dataset
+            </button>
+        </div>
+
+        <!-- Results Section -->
+        <div class="glass-panel results-zone" id="resultsPanel">
+            <h2>Dataset Profile</h2>
+            <div class="stats-grid" id="statsGrid">
+                <!-- Populated by JS -->
+            </div>
+            
+            <button class="btn" id="startResearchBtn">
+                <span class="loader" id="researchLoader"></span>
+                Start Autonomous Research (Journeys D-F)
+            </button>
+
+            <div class="terminal" id="terminal">
+                <p class="info">Ready to launch Autonomous Research Loop...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:5000/api";
+        let currentSessionId = null;
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadLoader = document.getElementById('uploadLoader');
+        const uploadPanel = document.getElementById('uploadPanel');
+        
+        const resultsPanel = document.getElementById('resultsPanel');
+        const statsGrid = document.getElementById('statsGrid');
+        
+        const startResearchBtn = document.getElementById('startResearchBtn');
+        const researchLoader = document.getElementById('researchLoader');
+        const terminal = document.getElementById('terminal');
+
+        let selectedFile = null;
+
+        // Drag & Drop Handlers
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        });
+
+        fileInput.addEventListener('change', function() {
+            handleFiles(this.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                selectedFile = files[0];
+                if (!selectedFile.name.endsWith('.csv')) {
+                    alert("Please select a valid .csv file");
+                    return;
+                }
+                document.querySelector('.upload-text').textContent = selectedFile.name;
+                document.querySelector('.upload-subtext').textContent = `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`;
+                uploadBtn.style.display = 'block';
+            }
+        }
+
+        function appendLog(msg, type='normal') {
+            const p = document.createElement('p');
+            p.className = type;
+            const time = new Date().toLocaleTimeString([], {hour12: false});
+            p.innerHTML = `<span class="timestamp">[${time}]</span> ${msg}`;
+            terminal.appendChild(p);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        // Upload Request (Journey A-C)
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            uploadLoader.style.display = 'inline-block';
+            
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            try {
+                const response = await fetch(`${API_BASE}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    currentSessionId = data.session_id;
+                    
+                    // Populate UI
+                    statsGrid.innerHTML = `
+                        <div class="stat-card">
+                            <div class="stat-value">${data.summary.num_rows}</div>
+                            <div class="stat-label">Rows</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${data.summary.num_cols}</div>
+                            <div class="stat-label">Columns</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" style="color: var(--accent);">${data.problem_type}</div>
+                            <div class="stat-label">Problem Type</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" style="color: #f59e0b;">${data.target_column}</div>
+                            <div class="stat-label">Target Column</div>
+                        </div>
+                    `;
+
+                    uploadPanel.style.display = 'none';
+                    resultsPanel.classList.add('active');
+                } else {
+                    alert(data.error || "Upload failed");
+                    uploadBtn.disabled = false;
+                }
+            } catch (err) {
+                alert("Connection to backend failed. Make sure Flask is running!");
+                uploadBtn.disabled = false;
+            } finally {
+                uploadLoader.style.display = 'none';
+            }
+        });
+
+        // Autonomous Research (Journeys D-F)
+        startResearchBtn.addEventListener('click', async () => {
+            if (!currentSessionId) return;
+
+            startResearchBtn.disabled = true;
+            researchLoader.style.display = 'inline-block';
+            
+            appendLog(`Initiating Journey D: Code Generation...`, 'info');
+
+            try {
+                // 1. Trigger CodeGen (Journey D)
+                const codeRes = await fetch(`${API_BASE}/codegen/${currentSessionId}`, { method: 'POST' });
+                const codeData = await codeRes.json();
+                
+                if (!codeRes.ok) throw new Error(codeData.error || "CodeGen failed");
+                appendLog(`✅ AI Code generated and executed. Cleaned shape: ${codeData.summary_after.num_rows}x${codeData.summary_after.num_cols}`, 'success');
+
+                // 2. Trigger Orchestrator SSE (Journey E-F)
+                appendLog(`Connecting to Autonomous Research Loop SSE...`, 'info');
+                
+                const eventSource = new EventSource(`${API_BASE}/orchestrate/${currentSessionId}`);
+                
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.status === 'error') {
+                        appendLog(`❌ Error: ${data.message}`, 'error');
+                        eventSource.close();
+                        researchLoader.style.display = 'none';
+                    } else if (data.status === 'done') {
+                        appendLog(`🏁 ${data.message}`, 'success');
+                        eventSource.close();
+                        researchLoader.style.display = 'none';
+                    } else {
+                        appendLog(`[${data.phase}] ${data.message}`);
+                    }
+                };
+
+                eventSource.onerror = function() {
+                    appendLog("SSE Connection lost or closed.", "error");
+                    eventSource.close();
+                    researchLoader.style.display = 'none';
+                };
+
+            } catch (err) {
+                appendLog(`Error: ${err.message}`, 'error');
+                startResearchBtn.disabled = false;
+                researchLoader.style.display = 'none';
+            }
+        });
+
+    </script>
+</body>
+</html>

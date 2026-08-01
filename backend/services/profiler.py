@@ -131,6 +131,8 @@ def _get_diverse_sample(df: pd.DataFrame, n: int = 10) -> list:
     sample_df = df.iloc[sorted_indices].copy()
 
     # Convert to records, handling NaN → None for JSON serialization
+    # Must cast to object first, otherwise float columns coerce None back to NaN
+    sample_df = sample_df.astype(object)
     records = sample_df.where(sample_df.notna(), None).to_dict(orient="records")
     return records
 

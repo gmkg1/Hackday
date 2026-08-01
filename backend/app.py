@@ -25,8 +25,12 @@ def create_app() -> Flask:
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
     # ── Register Blueprints ───────────────────────────────────────────────
+    from routers.upload_router import upload_bp
+    from routers.codegen_router import codegen_bp
+    from routers.orchestrate_router import orchestrate_bp
     app.register_blueprint(upload_bp)
     app.register_blueprint(codegen_bp)
+    app.register_blueprint(orchestrate_bp)
 
     @app.route("/api/health", methods=["GET"])
     def health():

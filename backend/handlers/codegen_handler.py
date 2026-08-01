@@ -68,8 +68,20 @@ def handle_codegen(session_id: str) -> Tuple[Dict[str, Any], int]:
         # Re-test the corrected code
         cleaned_df, exec_error = run_generated_code(code, df_sample)
 
-    # ── Step 6: Store generated code in session ───────────────────────────
+    # ── Step 6: Apply to full dataset & Store ─────────────────────────────
+    summary_after = {"num_rows": 0, "num_cols": 0}
     session.generated_code = code
+
+    if not exec_error:
+        # Run on the full dataset now that validation passed
+        cleaned_full_df, full_error = run_generated_code(code, df_raw)
+        
+        if not full_error and cleaned_full_df is not None:
+            session.dataset.df_clean = cleaned_full_df
+            summary_after["num_rows"] = cleaned_full_df.shape[0]
+            summary_after["num_cols"] = cleaned_full_df.shape[1]
+        else:
+            exec_error = full_error or "Returned None on full dataset"
 
     # ── Step 7: Build response ────────────────────────────────────────────
     response = {
@@ -77,6 +89,7 @@ def handle_codegen(session_id: str) -> Tuple[Dict[str, Any], int]:
         "code": code,
         "explanation": result.get("explanation", ""),
         "retries_used": retries,
+        "summary_after": summary_after,
         "validation": {
             "tested": True,
             "passed": exec_error is None,
