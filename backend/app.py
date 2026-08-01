@@ -28,10 +28,20 @@ def create_app() -> Flask:
     app.register_blueprint(upload_bp)
     app.register_blueprint(codegen_bp)
 
-    # ── Health Check ──────────────────────────────────────────────────────
     @app.route("/api/health", methods=["GET"])
     def health():
         return jsonify({"status": "ok", "service": "automl-scientist"}), 200
+
+    @app.route("/", methods=["GET"])
+    def index():
+        return jsonify({
+            "message": "Welcome to the AutoML Scientist API",
+            "endpoints": {
+                "upload": "POST /api/upload",
+                "codegen": "POST /api/codegen/<session_id>",
+                "health": "GET /api/health"
+            }
+        }), 200
 
     # ── Error Handlers ────────────────────────────────────────────────────
     @app.errorhandler(400)
