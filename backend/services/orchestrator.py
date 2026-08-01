@@ -57,6 +57,7 @@ Your diagnosis should consider:
 Rules of Engagement:
 • Never recommend a model without explaining WHY.
 • Never repeat an experiment that already failed unless there is a significant modification.
+• Do NOT simply output the same model family (e.g., RandomForest) repeatedly. You must select a model family appropriate to the dataset characteristics (e.g., regularized linear models for simple/linear datasets, tree-based ensembles like GradientBoostingClassifier, XGBoostClassifier, RandomForestClassifier, DecisionTreeClassifier for complex/non-linear datasets).
 • Return ONLY valid JSON matching this schema exactly:
 
 {{
@@ -87,6 +88,7 @@ Your `training_code` string MUST contain a Python function `def train(df, target
 The `score` MUST be a single float (the validation score).
 The `model` MUST be the trained scikit-learn model object (ready for predictions).
 It must import all necessary sklearn libraries.
+CRITICAL: Note that GradientBoostingClassifier, GradientBoostingRegressor, XGBClassifier, and XGBRegressor do NOT accept a 'class_weight' parameter in scikit-learn or xgboost. Do not pass 'class_weight' to them!
 """
 
 
@@ -105,7 +107,19 @@ def iterate_research_loop(
         "message": "Starting Autonomous Research Loop..."
     }
 
+    # Determine if we should use fallback mock logic
+    from config import GROQ_API_KEY
+    use_fallback = not GROQ_API_KEY
+
+    if use_fallback:
+        yield {
+            "status": "in_progress",
+            "phase": "Orchestrator",
+            "message": "Groq API key not configured. Initiating deterministic local research loop..."
+        }
+
     history = dataset_intelligence.get("experiment_history", [])
+    problem_type = dataset_intelligence.get("dataset", {}).get("problem_type", "classification")
 
     for iteration in range(1, max_iterations + 1):
         yield {
@@ -118,29 +132,123 @@ def iterate_research_loop(
         dataset_intelligence["session"]["experiment_iteration"] = iteration
         dataset_intelligence["experiment_history"] = history
 
-        prompt = MASTER_PROMPT.format(
-            dataset_intelligence=json.dumps(dataset_intelligence, indent=2)
-        )
+        if use_fallback:
+            # Deterministic mock pipeline training real models locally
+            if iteration == 1:
+                rec_model = "Random Forest Classifier" if problem_type == "classification" else "Random Forest Regressor"
+                primary_issue = "Capturing non-linear interactions in cleaned dataset."
+                reasoning = "Logistic / linear baselines might underfit. Upgrading to a Random Forest ensemble to establish a non-linear benchmark."
+                technical_exp = f"Upgraded model to {'RandomForestClassifier' if problem_type == 'classification' else 'RandomForestRegressor'} to model non-linear boundaries. Configured 100 estimators with default hyperparameters to establish an ensemble baseline."
+                
+                if problem_type == "classification":
+                    training_code = (
+                        "import pandas as pd\n"
+                        "import numpy as np\n"
+                        "from sklearn.ensemble import RandomForestClassifier\n"
+                        "from sklearn.model_selection import cross_val_score\n\n"
+                        "def train(df, target_col):\n"
+                        "    X = df.drop(columns=[target_col])\n"
+                        "    y = df[target_col]\n"
+                        "    model = RandomForestClassifier(n_estimators=100, random_state=42)\n"
+                        "    scores = cross_val_score(model, X, y, cv=5)\n"
+                        "    model.fit(X, y)\n"
+                        "    return float(scores.mean()), model"
+                    )
+                else:
+                    training_code = (
+                        "import pandas as pd\n"
+                        "import numpy as np\n"
+                        "from sklearn.ensemble import RandomForestRegressor\n"
+                        "from sklearn.model_selection import cross_val_score\n\n"
+                        "def train(df, target_col):\n"
+                        "    X = df.drop(columns=[target_col])\n"
+                        "    y = df[target_col]\n"
+                        "    model = RandomForestRegressor(n_estimators=100, random_state=42)\n"
+                        "    scores = cross_val_score(model, X, y, cv=5)\n"
+                        "    model.fit(X, y)\n"
+                        "    return float(scores.mean()), model"
+                    )
+            else:
+                rec_model = "Gradient Boosting Classifier" if problem_type == "classification" else "Gradient Boosting Regressor"
+                primary_issue = "Further minimizing residuals via boosted trees."
+                reasoning = "Ensemble performance from Random Forest can be improved by training weak learners sequentially using gradient descent."
+                technical_exp = f"Transitioned to {'GradientBoostingClassifier' if problem_type == 'classification' else 'GradientBoostingRegressor'} to sequentially optimize loss. Applied standard depth regularization to prevent overfitting on the ensemble iterations."
+                
+                if problem_type == "classification":
+                    training_code = (
+                        "import pandas as pd\n"
+                        "import numpy as np\n"
+                        "from sklearn.ensemble import GradientBoostingClassifier\n"
+                        "from sklearn.model_selection import cross_val_score\n\n"
+                        "def train(df, target_col):\n"
+                        "    X = df.drop(columns=[target_col])\n"
+                        "    y = df[target_col]\n"
+                        "    model = GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)\n"
+                        "    scores = cross_val_score(model, X, y, cv=5)\n"
+                        "    model.fit(X, y)\n"
+                        "    return float(scores.mean()), model"
+                    )
+                else:
+                    training_code = (
+                        "import pandas as pd\n"
+                        "import numpy as np\n"
+                        "from sklearn.ensemble import GradientBoostingRegressor\n"
+                        "from sklearn.model_selection import cross_val_score\n\n"
+                        "def train(df, target_col):\n"
+                        "    X = df.drop(columns=[target_col])\n"
+                        "    y = df[target_col]\n"
+                        "    model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)\n"
+                        "    scores = cross_val_score(model, X, y, cv=5)\n"
+                        "    model.fit(X, y)\n"
+                        "    return float(scores.mean()), model"
+                    )
 
-        response = call_groq_json(prompt)
-        
-        if response["error"]:
-            yield {
-                "status": "error",
-                "phase": f"Iteration {iteration}",
-                "message": f"LLM Error: {response['error']}"
+            llm_json = {
+                "summary": {
+                    "dataset_type": "binary_classification" if problem_type == "classification" else "regression",
+                    "difficulty": "Medium",
+                    "confidence": 0.90
+                },
+                "diagnosis": {
+                    "primary_issue": primary_issue,
+                    "secondary_issues": [],
+                    "reasoning": reasoning
+                },
+                "recommended_pipeline": {
+                    "recommended_model": rec_model,
+                    "hyperparameters": {"n_estimators": 100, "random_state": 42}
+                },
+                "code_changes": {
+                    "training_code": training_code
+                },
+                "explanation": {
+                    "technical": technical_exp
+                }
             }
-            break
+        else:
+            # Live LLM loop using Groq
+            prompt = MASTER_PROMPT.format(
+                dataset_intelligence=json.dumps(dataset_intelligence, indent=2)
+            )
+
+            response = call_groq_json(prompt)
             
-        llm_json = response["json"]
-        
+            if response["error"]:
+                yield {
+                    "status": "error",
+                    "phase": f"Iteration {iteration}",
+                    "message": f"LLM Error: {response['error']}"
+                }
+                break
+                
+            llm_json = response["json"]
+            training_code = llm_json["code_changes"].get("training_code", "")
+
         yield {
             "status": "in_progress",
             "phase": f"Iteration {iteration}",
             "message": f"LLM recommends: {llm_json['recommended_pipeline']['recommended_model']}. Reasoning: {llm_json['diagnosis']['primary_issue']}"
         }
-
-        training_code = llm_json["code_changes"].get("training_code", "")
         
         if not training_code:
             yield {
@@ -156,36 +264,7 @@ def iterate_research_loop(
             "message": "Executing recommended model in sandbox..."
         }
 
-        # We will use the executor but look for 'train' instead of 'clean'
-        # The executor needs to be slightly modified or we write a local runner for 'train'
-        # To avoid modifying executor too much, we'll execute it locally here for Journey E
-        import sys
-        import io
-        
-        local_ns = {}
-        global_ns = {
-            "__builtins__": __builtins__
-        }
-        
-        try:
-            exec(training_code, global_ns)
-            train_func = global_ns.get("train")
-            if not train_func:
-                raise ValueError("Generated code does not define a 'train(df, target_col)' function.")
-            
-            # Note: We need df_clean and target_column here. 
-            # We'll expect the handler to have put them in the generator context.
-            # However, since this is a generator, we actually need to pass df_clean here.
-            # For simplicity, we'll just yield the code back to the handler and let the handler execute it.
-            
-        except Exception as e:
-            # Yield error back
-            pass
-
-        # Since this generator doesn't have df_clean directly, I will refactor to have the handler call
-        # the ML engine. Actually, let's just make the orchestrator return the LLM response, and the handler does the execution.
-        
-        # We will yield the LLM proposed experiment and wait for the execution result
+        # Yield the proposed experiment to let the handler execute it
         execution_result = yield {
             "status": "experiment_proposed",
             "llm_json": llm_json,
@@ -209,8 +288,11 @@ def iterate_research_loop(
         else:
             score = execution_result.get("score", 0.0)
             yield {
-                "status": "in_progress",
-                "phase": f"Iteration {iteration}",
+                "status": "experiment_complete",
+                "iteration": iteration,
+                "model_name": llm_json['recommended_pipeline']['recommended_model'],
+                "metrics": {"score": score},
+                "explanation": llm_json['explanation'].get('technical', 'Model evaluated successfully.'),
                 "message": f"Execution succeeded! Score: {score:.4f}"
             }
             history.append({
@@ -226,3 +308,4 @@ def iterate_research_loop(
         "phase": "Completed",
         "message": "Autonomous Research Loop has completed."
     }
+
