@@ -43,9 +43,25 @@ def create_app() -> Flask:
             "endpoints": {
                 "upload": "POST /api/upload",
                 "codegen": "POST /api/codegen/<session_id>",
+                "orchestrate": "GET /api/orchestrate/<session_id>",
+                "download": "GET /api/download/<session_id>",
                 "health": "GET /api/health"
             }
         }), 200
+
+    @app.route("/api/download/<session_id>", methods=["GET"])
+    def download_model(session_id: str):
+        """Download the best model for a given session."""
+        from flask import send_file
+        model_path = os.path.join("models", f"{session_id}_best_model.pkl")
+        if not os.path.exists(model_path):
+            return jsonify({"error": "Model not found for this session."}), 404
+        
+        return send_file(
+            model_path,
+            as_attachment=True,
+            download_name=f"automl_model_{session_id[:8]}.pkl"
+        )
 
     # ── Error Handlers ────────────────────────────────────────────────────
     @app.errorhandler(400)

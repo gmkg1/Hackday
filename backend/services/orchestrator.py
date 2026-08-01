@@ -75,7 +75,7 @@ Rules of Engagement:
     "hyperparameters": {{}}
   }},
   "code_changes": {{
-    "training_code": "import pandas as pd\\nimport numpy as np\\nfrom sklearn.ensemble import RandomForestClassifier\\nfrom sklearn.model_selection import cross_val_score\\n\\ndef train(df, target_col):\\n    X = df.drop(columns=[target_col])\\n    y = df[target_col]\\n    model = RandomForestClassifier(n_estimators=100)\\n    scores = cross_val_score(model, X, y, cv=5)\\n    return float(scores.mean())"
+    "training_code": "import pandas as pd\\nimport numpy as np\\nfrom sklearn.ensemble import RandomForestClassifier\\nfrom sklearn.model_selection import cross_val_score\\n\\ndef train(df, target_col):\\n    X = df.drop(columns=[target_col])\\n    y = df[target_col]\\n    model = RandomForestClassifier(n_estimators=100)\\n    scores = cross_val_score(model, X, y, cv=5)\\n    # Retrain on full data to return the final model\\n    model.fit(X, y)\\n    return float(scores.mean()), model"
   }},
   "explanation": {{
     "technical": "..."
@@ -83,7 +83,9 @@ Rules of Engagement:
 }}
 
 NOTE ON training_code: 
-Your `training_code` string MUST contain a Python function `def train(df, target_col):` that returns a single float (the validation score).
+Your `training_code` string MUST contain a Python function `def train(df, target_col):` that returns a tuple `(score, model)`.
+The `score` MUST be a single float (the validation score).
+The `model` MUST be the trained scikit-learn model object (ready for predictions).
 It must import all necessary sklearn libraries.
 """
 

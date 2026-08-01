@@ -459,6 +459,17 @@
                         researchLoader.style.display = 'none';
                     } else if (data.status === 'done') {
                         appendLog(`🏁 ${data.message}`, 'success');
+                        
+                        const downloadBtn = document.createElement('a');
+                        downloadBtn.href = `${API_BASE}/download/${currentSessionId}`;
+                        downloadBtn.className = 'btn';
+                        downloadBtn.style.marginTop = '15px';
+                        downloadBtn.style.display = 'inline-block';
+                        downloadBtn.style.textDecoration = 'none';
+                        downloadBtn.style.backgroundColor = 'var(--accent)';
+                        downloadBtn.textContent = '📥 Download Best Model (.pkl)';
+                        document.getElementById('logs-container').appendChild(downloadBtn);
+                        
                         eventSource.close();
                         researchLoader.style.display = 'none';
                     } else {

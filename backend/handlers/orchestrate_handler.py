@@ -117,6 +117,8 @@ def orchestrate_pipeline_stream(session_id: str) -> Generator[str, None, None]:
                 
                 import sys
                 import traceback
+                import joblib
+                import os
                 
                 execution_result = {}
                 try:
@@ -125,7 +127,13 @@ def orchestrate_pipeline_stream(session_id: str) -> Generator[str, None, None]:
                     if not train_func:
                         execution_result = {"error": "No 'train' function defined."}
                     else:
-                        score = train_func(ds_state.df_clean, ds_state.target_column)
+                        result_tuple = train_func(ds_state.df_clean, ds_state.target_column)
+                        if isinstance(result_tuple, tuple) and len(result_tuple) == 2:
+                            score, model = result_tuple
+                        else:
+                            score = float(result_tuple)
+                            model = None
+                            
                         execution_result = {"score": score}
                         
                         # Save to session memory
@@ -139,6 +147,15 @@ def orchestrate_pipeline_stream(session_id: str) -> Generator[str, None, None]:
                             reason=llm_json['diagnosis']['reasoning']
                         )
                         session.experiments.append(exp)
+                        
+                        # Track the best model and save it
+                        best_score = getattr(session, "best_score", -float("inf"))
+                        if score > best_score and model is not None:
+                            session.best_score = score
+                            os.makedirs("models", exist_ok=True)
+                            model_path = os.path.join("models", f"{session_id}_best_model.pkl")
+                            joblib.dump(model, model_path)
+                            execution_result["best_model_path"] = model_path
                         
                 except Exception as e:
                     execution_result = {"error": str(e) + "\\n" + traceback.format_exc()}
