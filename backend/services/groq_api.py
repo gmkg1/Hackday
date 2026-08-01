@@ -1,18 +1,20 @@
 """
 Groq API Service — Pure API wrapper for Groq SDK.
 
-Responsibilities:
+Responsibility:
     - Groq client initialization
     - Sending prompts and receiving JSON responses
     - Error handling for API failures
 """
 import json
+import logging
 from typing import Dict, Any, Optional
 
 from groq import Groq
 
 from config import GROQ_API_KEY, GROQ_MODEL
 
+logger = logging.getLogger("app")
 
 # ── Groq Client (lazy-initialized) ───────────────────────────────────────────
 
@@ -78,8 +80,21 @@ def call_groq_json(
             response_format={"type": "json_object"},
         )
 
-        content = chat_completion.choices[0].message.content
+        msg = chat_completion.choices[0].message
+        content = msg.content
         
+        # Fallback to reasoning/reasoning_content attributes for reasoning-capable models (e.g. DeepSeek-R1)
+        if not content:
+            content = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None)
+            if not content and hasattr(msg, "model_extra"):
+                content = msg.model_extra.get("reasoning") or msg.model_extra.get("reasoning_content")
+
+        if not content:
+            return {
+                "json": None,
+                "error": f"Groq API returned empty or null content choice. Message object: {msg}"
+            }
+
         try:
             parsed_json = json.loads(content)
             return {
@@ -102,3 +117,36 @@ def call_groq_json(
 def is_groq_available() -> bool:
     """Check if the Groq API key is configured."""
     return bool(GROQ_API_KEY)
+
+
+def check_groq_api_status() -> Dict[str, Any]:
+    """
+    Test the Groq API key by making a lightweight test request.
+    Returns a dict indicating success, error message, and details.
+    """
+    if not GROQ_API_KEY:
+        return {"status": "inactive", "message": "GROQ_API_KEY is missing."}
+        
+    try:
+        client = _get_client()
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "user", "content": "Say hello"}
+            ],
+            model=GROQ_MODEL,
+            max_tokens=10,
+        )
+        msg = chat_completion.choices[0].message
+        content = msg.content
+        
+        # Fallback to reasoning content attributes for reasoning models
+        if not content:
+            content = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None)
+            if not content and hasattr(msg, "model_extra"):
+                content = msg.model_extra.get("reasoning") or msg.model_extra.get("reasoning_content")
+                
+        if content:
+            return {"status": "working", "message": "Groq API validated successfully."}
+        return {"status": "error", "message": "Groq API returned empty response."}
+    except Exception as e:
+        return {"status": "error", "message": f"Groq API connection failed: {str(e)}"}

@@ -14,6 +14,26 @@ from services.groq_api import call_groq_json
 from services.executor import run_generated_code
 
 
+# ==============================================================================
+#                      MASTER LLM ORCHESTRATOR PROMPT
+# ==============================================================================
+# This prompt guides the autonomous ML research loop (Journey F).
+# It instructs the LLM (typically Llama-3-70b via Groq) to act as a seasoned
+# data scientist.
+#
+# Key features of this prompt:
+#   1. Input: Dataset Intelligence JSON (schema, metrics, history, baselines).
+#   2. Output: Must return a STRICT JSON matching the schema containing:
+#      - "diagnosis": explanation of dataset weaknesses.
+#      - "recommended_pipeline": recommended model family and hyperparameters.
+#      - "code_changes": Python code containing a `def train(df, target_col):` function.
+#      - "explanation": technical rationale.
+#   3. Model Selection rules: Instructs the LLM to vary its selections over 
+#      iterations, avoid code repetition (especially RandomForest), and match 
+#      the algorithm to dataset complexity.
+#   4. Validation instructions: Reminds the LLM of libraries/parameters to import
+#      and not to use class_weight for GradientBoosting estimators.
+# ==============================================================================
 MASTER_PROMPT = """\
 You are AutoML Scientist.
 You are an autonomous Machine Learning Research Scientist.
@@ -92,6 +112,45 @@ CRITICAL: Note that GradientBoostingClassifier, GradientBoostingRegressor, XGBCl
 """
 
 
+SCHEMA_INSTRUCTIONS = """
+Rules of Engagement:
+• Never recommend a model without explaining WHY.
+• Never repeat an experiment that already failed unless there is a significant modification.
+• Do NOT simply output the same model family (e.g., RandomForest) repeatedly. You must select a model family appropriate to the dataset characteristics (e.g., regularized linear models for simple/linear datasets, tree-based ensembles like GradientBoostingClassifier, XGBoostClassifier, RandomForestClassifier, DecisionTreeClassifier for complex/non-linear datasets).
+• Return ONLY valid JSON matching this schema exactly:
+
+{
+  "summary": {
+    "dataset_type": "binary_classification",
+    "difficulty": "Medium",
+    "confidence": 0.88
+  },
+  "diagnosis": {
+    "primary_issue": "...",
+    "secondary_issues": ["..."],
+    "reasoning": "..."
+  },
+  "recommended_pipeline": {
+    "recommended_model": "...",
+    "hyperparameters": {}
+  },
+  "code_changes": {
+    "training_code": "import pandas as pd\\nimport numpy as np\\nfrom sklearn.ensemble import RandomForestClassifier\\nfrom sklearn.model_selection import cross_val_score\\n\\ndef train(df, target_col):\\n    X = df.drop(columns=[target_col])\\n    y = df[target_col]\\n    model = RandomForestClassifier(n_estimators=100)\\n    scores = cross_val_score(model, X, y, cv=5)\\n    # Retrain on full data to return the final model\\n    model.fit(X, y)\\n    return float(scores.mean()), model"
+  },
+  "explanation": {
+    "technical": "..."
+  }
+}
+
+NOTE ON training_code: 
+Your `training_code` string MUST contain a Python function `def train(df, target_col):` that returns a tuple `(score, model)`.
+The `score` MUST be a single float (the validation score).
+The `model` MUST be the trained scikit-learn model object (ready for predictions).
+It must import all necessary sklearn libraries.
+CRITICAL: Note that GradientBoostingClassifier, GradientBoostingRegressor, XGBClassifier, and XGBRegressor do NOT accept a 'class_weight' parameter in scikit-learn or xgboost. Do not pass 'class_weight' to them!
+"""
+
+
 def iterate_research_loop(
     dataset_intelligence: Dict[str, Any],
     max_iterations: int = 2
@@ -108,18 +167,26 @@ def iterate_research_loop(
     }
 
     # Determine if we should use fallback mock logic
-    from config import GROQ_API_KEY
-    use_fallback = not GROQ_API_KEY
+    from services.groq_api import is_groq_available, check_groq_api_status
+    use_fallback = not is_groq_available()
+    if not use_fallback:
+        try:
+            api_status = check_groq_api_status()
+            if api_status["status"] != "working":
+                use_fallback = True
+        except Exception:
+            use_fallback = True
 
     if use_fallback:
         yield {
             "status": "in_progress",
             "phase": "Orchestrator",
-            "message": "Groq API key not configured. Initiating deterministic local research loop..."
+            "message": "Groq/OpenRouter API connection failed or key not configured. Initiating deterministic local research loop..."
         }
 
     history = dataset_intelligence.get("experiment_history", [])
     problem_type = dataset_intelligence.get("dataset", {}).get("problem_type", "classification")
+    last_gemini_prompt = None
 
     for iteration in range(1, max_iterations + 1):
         yield {
@@ -133,6 +200,8 @@ def iterate_research_loop(
         dataset_intelligence["experiment_history"] = history
 
         if use_fallback:
+            logger = logging.getLogger("app")
+            logger.info(f">>>> [ORCHESTRATOR] Iteration {iteration}: Running in LOCAL BACKUP MODE (fallback engine).")
             # Deterministic mock pipeline training real models locally
             if iteration == 1:
                 rec_model = "Random Forest Classifier" if problem_type == "classification" else "Random Forest Regressor"
@@ -227,22 +296,173 @@ def iterate_research_loop(
             }
         else:
             # Live LLM loop using Groq
-            prompt = MASTER_PROMPT.format(
-                dataset_intelligence=json.dumps(dataset_intelligence, indent=2)
-            )
+            logger = logging.getLogger("app")
+            if last_gemini_prompt:
+                logger.info(f">>>> [ORCHESTRATOR] Iteration {iteration}: Sending Gemini-engineered prompt to Groq API...")
+                prompt = last_gemini_prompt
+            else:
+                logger.info(f">>>> [ORCHESTRATOR] Iteration {iteration}: Sending default Master Prompt to Groq API...")
+                prompt = MASTER_PROMPT.format(
+                    dataset_intelligence=json.dumps(dataset_intelligence, indent=2)
+                )
 
             response = call_groq_json(prompt)
             
             if response["error"]:
+                logger.error(f">>>> [ORCHESTRATOR] Iteration {iteration}: Groq API returned error: {response['error']}. Switching to fallback engine.")
                 yield {
-                    "status": "error",
+                    "status": "in_progress",
                     "phase": f"Iteration {iteration}",
-                    "message": f"LLM Error: {response['error']}"
+                    "message": f"LLM Error ({response['error']}). Falling back to local research engine..."
                 }
-                break
+                use_fallback = True
+                if iteration == 1:
+                    rec_model = "Random Forest Classifier" if problem_type == "classification" else "Random Forest Regressor"
+                    primary_issue = "Capturing non-linear interactions in cleaned dataset."
+                    reasoning = "Logistic / linear baselines might underfit. Upgrading to a Random Forest ensemble to establish a non-linear benchmark."
+                    technical_exp = f"Upgraded model to {'RandomForestClassifier' if problem_type == 'classification' else 'RandomForestRegressor'} to model non-linear boundaries. Configured 100 estimators with default hyperparameters to establish an ensemble baseline."
+                    
+                    if problem_type == "classification":
+                        training_code = (
+                            "import pandas as pd\n"
+                            "import numpy as np\n"
+                            "from sklearn.ensemble import RandomForestClassifier\n"
+                            "from sklearn.model_selection import cross_val_score\n\n"
+                            "def train(df, target_col):\n"
+                            "    X = df.drop(columns=[target_col])\n"
+                            "    y = df[target_col]\n"
+                            "    model = RandomForestClassifier(n_estimators=100, random_state=42)\n"
+                            "    scores = cross_val_score(model, X, y, cv=5)\n"
+                            "    model.fit(X, y)\n"
+                            "    return float(scores.mean()), model"
+                        )
+                    else:
+                        training_code = (
+                            "import pandas as pd\n"
+                            "import numpy as np\n"
+                            "from sklearn.ensemble import RandomForestRegressor\n"
+                            "from sklearn.model_selection import cross_val_score\n\n"
+                            "def train(df, target_col):\n"
+                            "    X = df.drop(columns=[target_col])\n"
+                            "    y = df[target_col]\n"
+                            "    model = RandomForestRegressor(n_estimators=100, random_state=42)\n"
+                            "    scores = cross_val_score(model, X, y, cv=5)\n"
+                            "    model.fit(X, y)\n"
+                            "    return float(scores.mean()), model"
+                        )
+                else:
+                    rec_model = "Gradient Boosting Classifier" if problem_type == "classification" else "Gradient Boosting Regressor"
+                    primary_issue = "Further minimizing residuals via boosted trees."
+                    reasoning = "Ensemble performance from Random Forest can be improved by training weak learners sequentially using gradient descent."
+                    technical_exp = f"Transitioned to {'GradientBoostingClassifier' if problem_type == 'classification' else 'GradientBoostingRegressor'} to sequentially optimize loss. Applied standard depth regularization to prevent overfitting on the ensemble iterations."
+                    
+                    if problem_type == "classification":
+                        training_code = (
+                            "import pandas as pd\n"
+                            "import numpy as np\n"
+                            "from sklearn.ensemble import GradientBoostingClassifier\n"
+                            "from sklearn.model_selection import cross_val_score\n\n"
+                            "def train(df, target_col):\n"
+                            "    X = df.drop(columns=[target_col])\n"
+                            "    y = df[target_col]\n"
+                            "    model = GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)\n"
+                            "    scores = cross_val_score(model, X, y, cv=5)\n"
+                            "    model.fit(X, y)\n"
+                            "    return float(scores.mean()), model"
+                        )
+                    else:
+                        training_code = (
+                            "import pandas as pd\n"
+                            "import numpy as np\n"
+                            "from sklearn.ensemble import GradientBoostingRegressor\n"
+                            "from sklearn.model_selection import cross_val_score\n\n"
+                            "def train(df, target_col):\n"
+                            "    X = df.drop(columns=[target_col])\n"
+                            "    y = df[target_col]\n"
+                            "    model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)\n"
+                            "    scores = cross_val_score(model, X, y, cv=5)\n"
+                            "    model.fit(X, y)\n"
+                            "    return float(scores.mean()), model"
+                        )
+
+                llm_json = {
+                    "summary": {
+                        "dataset_type": "binary_classification" if problem_type == "classification" else "regression",
+                        "difficulty": "Medium",
+                        "confidence": 0.90
+                    },
+                    "diagnosis": {
+                        "primary_issue": primary_issue,
+                        "secondary_issues": [],
+                        "reasoning": reasoning
+                    },
+                    "recommended_pipeline": {
+                        "recommended_model": rec_model,
+                        "hyperparameters": {"n_estimators": 100, "random_state": 42}
+                    },
+                    "code_changes": {
+                        "training_code": training_code
+                    },
+                    "explanation": {
+                        "technical": technical_exp
+                    }
+                }
+            else:
+                llm_json = response["json"]
                 
-            llm_json = response["json"]
-            training_code = llm_json["code_changes"].get("training_code", "")
+                # Defensive parsing of Llama-3's JSON response
+                if "code_changes" in llm_json and isinstance(llm_json["code_changes"], dict):
+                    training_code = llm_json["code_changes"].get("training_code", "")
+                elif "code" in llm_json:
+                    training_code = llm_json["code"]
+                elif "training_code" in llm_json:
+                    training_code = llm_json["training_code"]
+                else:
+                    # Look for any key containing "code" or "train"
+                    training_code = ""
+                    for k, v in llm_json.items():
+                        if "code" in k.lower() or "train" in k.lower():
+                            if isinstance(v, str):
+                                training_code = v
+                                break
+                            elif isinstance(v, dict) and "training_code" in v:
+                                training_code = v["training_code"]
+                                break
+
+                # Defensively ensure other expected keys exist
+                if "recommended_pipeline" not in llm_json:
+                    llm_json["recommended_pipeline"] = {
+                        "recommended_model": llm_json.get("recommended_model", "XGBoost Classifier"),
+                        "hyperparameters": llm_json.get("hyperparameters", {})
+                    }
+                elif isinstance(llm_json["recommended_pipeline"], dict):
+                    if "recommended_model" not in llm_json["recommended_pipeline"]:
+                        llm_json["recommended_pipeline"]["recommended_model"] = llm_json.get("recommended_model", "XGBoost Classifier")
+                
+                if "diagnosis" not in llm_json:
+                    llm_json["diagnosis"] = {
+                        "primary_issue": llm_json.get("primary_issue", "Improving model configuration based on Gemini review."),
+                        "reasoning": llm_json.get("reasoning", "Tuned hyperparameters sequentially.")
+                    }
+                elif isinstance(llm_json["diagnosis"], dict):
+                    if "primary_issue" not in llm_json["diagnosis"]:
+                        llm_json["diagnosis"]["primary_issue"] = llm_json.get("primary_issue", "Improving model configuration.")
+                    if "reasoning" not in llm_json["diagnosis"]:
+                        llm_json["diagnosis"]["reasoning"] = llm_json.get("reasoning", "Tuned hyperparameters sequentially.")
+
+                if "explanation" not in llm_json:
+                    llm_json["explanation"] = {
+                        "technical": llm_json.get("explanation_text", llm_json.get("reasoning", "Model evaluated successfully."))
+                    }
+                elif isinstance(llm_json["explanation"], dict):
+                    if "technical" not in llm_json["explanation"]:
+                        llm_json["explanation"]["technical"] = llm_json.get("explanation_text", llm_json["explanation"].get("beginner", "Model evaluated successfully."))
+                elif isinstance(llm_json["explanation"], str):
+                    llm_json["explanation"] = {
+                        "technical": llm_json["explanation"]
+                    }
+
+
 
         yield {
             "status": "in_progress",
@@ -271,6 +491,8 @@ def iterate_research_loop(
             "training_code": training_code,
             "iteration": iteration
         }
+        
+        last_gemini_prompt = execution_result.get("gemini_prompt")
         
         if execution_result.get("error"):
             yield {

@@ -32,6 +32,28 @@ from services.gemini_api import call_gemini, is_api_available
 # PROMPT TEMPLATES
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ==============================================================================
+#                      DATA CLEANING CODE PROMPT TEMPLATE
+# ==============================================================================
+# This prompt instructs Gemini to generate a data cleaning script (Journey D).
+# It passes detailed profiling intelligence including missing value percentages,
+# basic stats, correlation heatmaps, class imbalances, outlier heuristics,
+# and data leakage flags.
+#
+# Key Features:
+#   1. Input: Interpolated metadata variables (shape, cols, types, cardinality,
+#             missing values, outliers, imbalance details, sample rows).
+#   2. Output: Must return ONLY executable Python code defining a function
+#      `def clean(df: pd.DataFrame) -> pd.DataFrame:`.
+#   3. Preprocessing requirements enforced:
+#      - Missing value imputations (median/mode/dropping).
+#      - Exact duplicate removals.
+#      - IQR-based outlier clipping.
+#      - Imbalance treatment (SMOTE upsampling if <30%).
+#      - Feature encoding (one-hot vs label).
+#      - Scaling (StandardScaler).
+#      - High cardinality dropping.
+# ==============================================================================
 CLEANING_CODE_PROMPT = """\
 You are an expert data scientist. Given the dataset metadata below, write a \
 comprehensive Python preprocessing function that cleans the dataframe for a \
@@ -126,6 +148,15 @@ Return ONLY valid Python code. No markdown fences, no explanations outside the c
 """
 
 
+# ==============================================================================
+#                      CODE CORRECTION PROMPT TEMPLATE
+# ==============================================================================
+# Used for the Self-Correction loop in the code generator service. If the LLM's
+# generated preprocessing code throws a syntax or execution error inside the
+# sandbox, this prompt feeds the traceback and erroneous code back to the LLM.
+# It demands a corrected, fully executable version of the function without any
+# textual explanations.
+# ==============================================================================
 CORRECTION_PROMPT = """\
 The following Python preprocessing code was generated for a {problem_type} \
 dataset but FAILED during execution.

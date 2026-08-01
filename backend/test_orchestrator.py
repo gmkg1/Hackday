@@ -74,14 +74,18 @@ def run_test():
                 msg = data.get("message")
                 
                 if status == "error":
-                    print(f"[ERROR] {phase}: {msg}")
+                    safe_msg = str(msg).encode('ascii', errors='replace').decode('ascii')
+                    print(f"[ERROR] {phase}: {safe_msg}")
                 elif status == "done":
-                    print(f"[DONE] {msg}")
+                    safe_msg = str(msg).encode('ascii', errors='replace').decode('ascii')
+                    print(f"[DONE] {safe_msg}")
                 else:
-                    print(f"[{phase}] {msg}")
+                    safe_msg = str(msg).encode('ascii', errors='replace').decode('ascii')
+                    print(f"[{phase}] {safe_msg}")
                     
             except Exception as e:
-                print(f"Failed to parse SSE event: {sse_event}")
+                safe_event = str(sse_event).encode('ascii', errors='replace').decode('ascii')
+                print(f"Failed to parse SSE event: {safe_event}")
                 print(e)
                 
     print("\n==================================================")
