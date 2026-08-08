@@ -49,6 +49,12 @@ def create_app() -> Flask:
             }
         }), 200
 
+    @app.route("/static/plots/<filename>", methods=["GET"])
+    def serve_plot(filename: str):
+        from flask import send_from_directory
+        plots_dir = os.path.join(os.getcwd(), "static", "plots")
+        return send_from_directory(plots_dir, filename)
+
     @app.route("/api/download/<session_id>", methods=["GET"])
     def download_model(session_id: str):
         """Download the best model for a given session."""

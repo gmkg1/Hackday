@@ -108,17 +108,23 @@ class SessionState:
 - Receives a Python function `def clean(df: pd.DataFrame) -> pd.DataFrame`.
 - Executes this function in the sandboxed python namespace.
 - If it fails, runs a self-correction retry loop (up to 2 times) with the error traceback, before falling back to a static scikit-learn pipeline.
+- Automatically generates a static **Correlation Heatmap** plot using `matplotlib` and `seaborn` and saves it to `static/plots/{session_id}_correlation.png`.
 
 ### 3. Autonomous Research Loop (`GET /api/orchestrate/<session_id>`)
 - Streams progress line-by-line using Server-Sent Events (SSE).
 - Compiles the **Dataset Intelligence JSON** containing baseline scores (Logistic Regression / Decision Tree).
 - Runs the orchestrator loop:
-  1. Sends the Master Prompt (with previous history) to Groq (Llama-3.3-70b-versatile).
+  1. Sends the Master Prompt (with previous history) to Groq.
   2. Receives recommendations and training code string defining `def train(df, target_col)`.
   3. Executes the training code on the cleaned dataset.
   4. Returns the K-Fold CV score and trained model.
   5. Repeats (default: 2 iterations).
+- Integrates a **runtime monkey-patch** over `sklearn.model_selection` (`cross_val_score`, `cross_validate`) to automatically dynamically scale the number of CV splits down if the sample size is less than 5, preventing `ValueError` crashes.
 - Saves the best model locally in the `models/` directory using joblib.
+- Automatically generates a **Confusion Matrix** plot (for classification) or regression metric card assets, and a **Feature Importance Analysis** bar chart using `matplotlib` / `seaborn`, saving them to `static/plots/{session_id}_confusion.png` and `static/plots/{session_id}_importance.png`.
 
-### 4. Download Model (`GET /api/download/<session_id>`)
+### 4. Plot Serving (`GET /static/plots/<filename>`)
+- Flask endpoint that serves the generated PNG correlation, confusion matrix, and feature importance charts dynamically to the frontend.
+
+### 5. Download Model (`GET /api/download/<session_id>`)
 - Serves the best-performing model serialized `.pkl` file for local use.

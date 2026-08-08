@@ -219,7 +219,13 @@ def orchestrate_pipeline_stream(session_id: str) -> Generator[str, None, None]:
                 
                 execution_result = {}
                 try:
-                    exec(training_code, local_ns)
+                    import pandas as pd
+                    orig_read_csv = pd.read_csv
+                    try:
+                        pd.read_csv = lambda *args, **kwargs: ds_state.df_clean
+                        exec(training_code, local_ns)
+                    finally:
+                        pd.read_csv = orig_read_csv
                     train_func = local_ns.get("train")
                     if not train_func:
                         # Defensive extraction from local namespace if LLM forgot def train()
@@ -254,6 +260,12 @@ def orchestrate_pipeline_stream(session_id: str) -> Generator[str, None, None]:
                                 score = 0.5
                                 
                         execution_result = {"score": score}
+                        metrics_payload = {"score": score}
+                        gemini_prompt = None
+                        if model is not None:
+                            computed = compute_evaluation_metrics(session_id, model, ds_state.df_clean, ds_state.target_column, problem_info["problem_type"])
+                            if "error" not in computed:
+                                metrics_payload.update(computed)
                     else:
                         result_tuple = train_func(ds_state.df_clean, ds_state.target_column)
                         if isinstance(result_tuple, tuple) and len(result_tuple) == 2:
@@ -273,7 +285,7 @@ def orchestrate_pipeline_stream(session_id: str) -> Generator[str, None, None]:
                         metrics_payload = {"score": score}
                         gemini_prompt = None
                         if model is not None:
-                            computed = compute_evaluation_metrics(model, ds_state.df_clean, ds_state.target_column, problem_info["problem_type"])
+                            computed = compute_evaluation_metrics(session_id, model, ds_state.df_clean, ds_state.target_column, problem_info["problem_type"])
                             if "error" not in computed:
                                 metrics_payload.update(computed)
                                 
@@ -400,21 +412,86 @@ Return a valid JSON object matching this schema:
         })
 
 
-def compute_evaluation_metrics(model, df, target_col, problem_type):
+def compute_evaluation_metrics(session_id, model, df, target_col, problem_type):
     from sklearn.metrics import classification_report, confusion_matrix, r2_score, mean_squared_error, mean_absolute_error
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    import os
+
     try:
         X = df.drop(columns=[target_col])
         y_true = df[target_col]
         y_pred = model.predict(X)
         
+        # Extract feature importances if available
+        importances = {}
+        features = X.columns.tolist()
+        if hasattr(model, "feature_importances_"):
+            importances = dict(zip(features, [float(v) for v in model.feature_importances_]))
+        elif hasattr(model, "coef_"):
+            coefs = model.coef_
+            if coefs.ndim > 1:
+                coef_vals = np.abs(coefs).mean(axis=0).tolist()
+            else:
+                coef_vals = np.abs(coefs).tolist()
+            importances = dict(zip(features, [float(v) for v in coef_vals]))
+        
+        # ── Generate and save Feature Importance plot ──
+        if importances:
+            try:
+                sorted_imp = sorted(importances.items(), key=lambda x: x[1], reverse=True)[:8]
+                if sorted_imp:
+                    imp_features = [x[0] for x in sorted_imp]
+                    imp_values = [x[1] for x in sorted_imp]
+                    plt.figure(figsize=(6, 4))
+                    colors = sns.color_palette("viridis", len(imp_features))
+                    plt.barh(imp_features[::-1], imp_values[::-1], color=colors)
+                    plt.xlabel("Relative Importance Score", fontsize=9)
+                    plt.title("Feature Importance Analysis (Best Model)", fontsize=10, fontweight="bold", pad=15)
+                    plt.tight_layout()
+                    
+                    os.makedirs(os.path.join("static", "plots"), exist_ok=True)
+                    plt.savefig(os.path.join("static", "plots", f"{session_id}_importance.png"), dpi=150)
+                    plt.close()
+            except Exception as ex:
+                print(f"Failed to generate importance plot: {ex}")
+
         if problem_type == "classification":
             report = classification_report(y_true, y_pred, output_dict=True)
-            cm = confusion_matrix(y_true, y_pred).tolist()
+            cm = confusion_matrix(y_true, y_pred)
             acc = report.get("accuracy", 0.0)
+            
+            # ── Generate and save Confusion Matrix plot ──
+            try:
+                plt.figure(figsize=(5, 4))
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt="d",
+                    cmap="Greens",
+                    cbar=False,
+                    square=True,
+                    annot_kws={"size": 14, "weight": "bold"}
+                )
+                plt.xlabel("Predicted Class", fontsize=9, labelpad=8)
+                plt.ylabel("True Class", fontsize=9, labelpad=8)
+                plt.title("Confusion Matrix (Best Model)", fontsize=10, fontweight="bold", pad=15)
+                plt.tight_layout()
+                
+                os.makedirs(os.path.join("static", "plots"), exist_ok=True)
+                plt.savefig(os.path.join("static", "plots", f"{session_id}_confusion.png"), dpi=150)
+                plt.close()
+            except Exception as ex:
+                print(f"Failed to generate confusion plot: {ex}")
+
             return {
                 "accuracy": acc,
                 "classification_report": report,
-                "confusion_matrix": cm,
+                "confusion_matrix": cm.tolist(),
+                "feature_importances": importances,
                 "summary": f"Accuracy: {acc:.4f}, Macro F1: {report.get('macro avg', {}).get('f1-score', 0.0):.4f}"
             }
         else:
@@ -425,6 +502,7 @@ def compute_evaluation_metrics(model, df, target_col, problem_type):
                 "r2_score": r2,
                 "mean_squared_error": mse,
                 "mean_absolute_error": mae,
+                "feature_importances": importances,
                 "summary": f"R2 Score: {r2:.4f}, MSE: {mse:.4f}, MAE: {mae:.4f}"
             }
     except Exception as e:

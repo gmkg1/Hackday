@@ -80,6 +80,7 @@ def handle_codegen(session_id: str) -> Tuple[Dict[str, Any], int]:
             session.dataset.df_clean = cleaned_full_df
             summary_after["num_rows"] = cleaned_full_df.shape[0]
             summary_after["num_cols"] = cleaned_full_df.shape[1]
+            generate_correlation_heatmap(session_id, cleaned_full_df, session.dataset.target_column)
         else:
             exec_error = full_error or "Returned None on full dataset"
 
@@ -105,3 +106,48 @@ def handle_codegen(session_id: str) -> Tuple[Dict[str, Any], int]:
         )
 
     return response, 200
+
+
+def generate_correlation_heatmap(session_id: str, df, target_col: str):
+    """Generate and save features correlation matrix as a high-quality static plot."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import os
+        
+        numeric_df = df.select_dtypes(include=["number"])
+        if numeric_df.empty:
+            return
+            
+        cols = numeric_df.columns.tolist()
+        if len(cols) > 10:
+            if target_col in cols:
+                corrs = numeric_df.corr()[target_col].abs().sort_values(ascending=False)
+                top_cols = corrs.head(10).index.tolist()
+                numeric_df = numeric_df[top_cols]
+            else:
+                numeric_df = numeric_df.iloc[:, :10]
+
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(
+            numeric_df.corr(),
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            vmin=-1,
+            vmax=1,
+            cbar=True,
+            square=True,
+            annot_kws={"size": 8}
+        )
+        plt.title("Feature Correlation Heatmap", fontsize=10, fontweight="bold", pad=15)
+        plt.tight_layout()
+        
+        os.makedirs(os.path.join("static", "plots"), exist_ok=True)
+        plot_path = os.path.join("static", "plots", f"{session_id}_correlation.png")
+        plt.savefig(plot_path, dpi=150)
+        plt.close()
+    except Exception as ex:
+        print(f"Failed to generate correlation plot: {ex}")

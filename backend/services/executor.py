@@ -86,7 +86,12 @@ def run_generated_code(
     try:
         # Execute the script (defines the clean function)
         # We use only global_namespace so that imports and the function definition share the same scope
-        exec(code_string, global_namespace)
+        orig_read_csv = pd.read_csv
+        try:
+            pd.read_csv = lambda *args, **kwargs: df_copy
+            exec(code_string, global_namespace)
+        finally:
+            pd.read_csv = orig_read_csv
 
         # Find and call the clean() function
         clean_func = global_namespace.get("clean")

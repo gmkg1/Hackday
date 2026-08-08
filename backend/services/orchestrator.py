@@ -109,6 +109,7 @@ The `score` MUST be a single float (the validation score).
 The `model` MUST be the trained scikit-learn model object (ready for predictions).
 It must import all necessary sklearn libraries.
 CRITICAL: Note that GradientBoostingClassifier, GradientBoostingRegressor, XGBClassifier, and XGBRegressor do NOT accept a 'class_weight' parameter in scikit-learn or xgboost. Do not pass 'class_weight' to them!
+CRITICAL: Do NOT call pd.read_csv(), open(), or attempt to load any data files from disk. The data is already loaded and passed to your function as the `df` parameter. Writing code that loads files will fail.
 """
 
 
@@ -148,6 +149,7 @@ The `score` MUST be a single float (the validation score).
 The `model` MUST be the trained scikit-learn model object (ready for predictions).
 It must import all necessary sklearn libraries.
 CRITICAL: Note that GradientBoostingClassifier, GradientBoostingRegressor, XGBClassifier, and XGBRegressor do NOT accept a 'class_weight' parameter in scikit-learn or xgboost. Do not pass 'class_weight' to them!
+CRITICAL: Do NOT call pd.read_csv(), open(), or attempt to load any data files from disk. The data is already loaded and passed to your function as the `df` parameter. Writing code that loads files will fail.
 """
 
 
