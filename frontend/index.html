@@ -262,6 +262,57 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        /* Backend Status Badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.85rem;
+            padding: 0.45rem 1.1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            backdrop-filter: blur(8px);
+            transition: all 0.3s ease;
+        }
+
+        .status-badge.connected {
+            border-color: rgba(16, 185, 129, 0.4);
+            color: #34d399;
+            background: rgba(16, 185, 129, 0.12);
+        }
+
+        .status-badge.error {
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #f87171;
+            background: rgba(239, 68, 68, 0.12);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #94a3b8;
+        }
+
+        .status-dot.connected {
+            background-color: #10b981;
+            box-shadow: 0 0 8px #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.disconnected {
+            background-color: #ef4444;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
     </style>
 </head>
 <body>
@@ -269,6 +320,9 @@
     <header>
         <h1>AutoML Scientist</h1>
         <p class="subtitle">Autonomous Machine Learning Agent</p>
+        <div class="status-badge" id="backendStatus">
+            <span class="status-dot"></span> Checking backend connection...
+        </div>
     </header>
 
     <div class="container">
@@ -305,8 +359,50 @@
     </div>
 
     <script>
-        const API_BASE = "http://127.0.0.1:5000/api";
+        // Dynamically resolve Backend API Base URL
+        let API_BASE = (function() {
+            if (window.location.protocol.startsWith('http')) {
+                if (window.location.port === "5000") return "/api";
+                return `${window.location.protocol}//${window.location.hostname}:5000/api`;
+            }
+            return "http://localhost:5000/api";
+        })();
         let currentSessionId = null;
+
+        // Auto-detect & monitor Backend Health
+        const statusBadge = document.getElementById('backendStatus');
+        async function checkBackendConnection() {
+            const candidates = [
+                API_BASE,
+                "/api",
+                `http://${window.location.hostname}:5000/api`,
+                "http://localhost:5000/api",
+                "http://127.0.0.1:5000/api"
+            ];
+            
+            // Remove duplicates
+            const uniqueCandidates = [...new Set(candidates.filter(Boolean))];
+
+            for (const base of uniqueCandidates) {
+                try {
+                    const res = await fetch(`${base}/health`);
+                    const data = await res.json();
+                    if (res.ok && data.status === 'ok') {
+                        API_BASE = base;
+                        statusBadge.innerHTML = `<span class="status-dot connected"></span> Connected to Backend (${base})`;
+                        statusBadge.className = 'status-badge connected';
+                        return;
+                    }
+                } catch (err) {
+                    // try next candidate
+                }
+            }
+
+            statusBadge.innerHTML = `<span class="status-dot disconnected"></span> Backend Offline (Check 127.0.0.1:5000)`;
+            statusBadge.className = 'status-badge error';
+        }
+        checkBackendConnection();
+        setInterval(checkBackendConnection, 5000);
 
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');

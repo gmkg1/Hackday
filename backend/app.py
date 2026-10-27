@@ -21,8 +21,16 @@ def create_app() -> Flask:
     """Flask application factory."""
     app = Flask(__name__)
 
-    # ── CORS (allow React frontend) ───────────────────────────────────────
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # ── CORS (allow all origins, headers, and private network access) ───
+    CORS(app, resources={r"/*": {"origins": "*"}})
+
+    @app.after_request
+    def add_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
 
     # ── Register Blueprints ───────────────────────────────────────────────
     from routers.upload_router import upload_bp
@@ -38,16 +46,34 @@ def create_app() -> Flask:
 
     @app.route("/", methods=["GET"])
     def index():
-        return jsonify({
-            "message": "Welcome to the AutoML Scientist API",
-            "endpoints": {
-                "upload": "POST /api/upload",
-                "codegen": "POST /api/codegen/<session_id>",
-                "orchestrate": "GET /api/orchestrate/<session_id>",
-                "download": "GET /api/download/<session_id>",
-                "health": "GET /api/health"
-            }
-        }), 200
+        from flask import request, send_file
+        # If client explicitly asks for JSON, return API index
+        if request.headers.get("Accept") == "application/json":
+            return jsonify({
+                "message": "Welcome to the AutoML Scientist API",
+                "endpoints": {
+                    "upload": "POST /api/upload",
+                    "codegen": "POST /api/codegen/<session_id>",
+                    "orchestrate": "GET /api/orchestrate/<session_id>",
+                    "download": "GET /api/download/<session_id>",
+                    "health": "GET /api/health"
+                }
+            }), 200
+
+        # Otherwise serve the frontend directly
+        frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "index.html")
+        if os.path.exists(frontend_path):
+            return send_file(frontend_path)
+
+        return jsonify({"message": "AutoML Scientist API running"}), 200
+
+    @app.route("/sample_dataset.csv", methods=["GET"])
+    def sample_dataset():
+        from flask import send_file
+        dataset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "sample_dataset.csv")
+        if os.path.exists(dataset_path):
+            return send_file(dataset_path, as_attachment=False)
+        return jsonify({"error": "Dataset not found"}), 404
 
     @app.route("/static/plots/<filename>", methods=["GET"])
     def serve_plot(filename: str):
